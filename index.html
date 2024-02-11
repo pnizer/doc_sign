@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en-US">
+
+<head>
+  <meta charset="utf-8" />
+  <title>hello-wasm example</title>
+</head>
+
+<body>
+  <input type="file" id="fileInput">
+  <script type="module">
+    import init, { Sha256Digester, EcdsaSecp256k1, addSignedPageToPdf } from "./pkg/doc_sign.js";
+
+    function hexToUint8Array(str) {
+      return new Uint8Array(str.match(/.{1,2}/g).map(byte => parseInt(byte, 16)));
+    }
+
+    function uint8ArrayToHex(arr) {      
+      return Array.from(arr).map(byte => byte.toString(16).padStart(2, '0')).join('');
+    }
+
+    init().then(() => {
+      document.getElementById('fileInput').addEventListener('change', async (event) => {
+        const file = event.target.files[0];
+        const stream = file.stream();
+        const reader = stream.getReader();
+        const digester = new Sha256Digester();
+
+        // digest and store the file in the memory in a Uint8Array
+        const uint8ArrayForFile = new Uint8Array(file.size);
+        let offset = 0;
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) {
+            break;
+          }
+          digester.update(value);          
+          uint8ArrayForFile.set(value, offset);
+          offset += value.length;
+        }
+
+        const hash = digester.finish();
+        console.log(`hash = ${uint8ArrayToHex(hash)}`);
+
+        const secret = "0fcea93fdea0737c82fd6bbc23f26ad08e5541d4dea5fec9269885887d498c88";
+        const signer = EcdsaSecp256k1.fromSecret(hexToUint8Array(secret));
+        console.log(`public = ${uint8ArrayToHex(signer.publicKey())}`);
+        
+        const signature = signer.sign(hash);
+        console.log(signature);
+        console.log(`signature = ${uint8ArrayToHex(signature)}`);
+
+        const publicKey = "0251aa6bbbbbcc84dacb16ee5ea0e9c81d4bd11190a67c65de66507aa72900b201";
+        const verifier = EcdsaSecp256k1.fromPublic(hexToUint8Array(publicKey));
+
+        console.log(verifier.validate(signature, hash));        
+
+        const signedPdf = await addSignedPageToPdf(uint8ArrayForFile);
+        const blob = new Blob([signedPdf], { type: 'application/pdf' });
+        const url = URL.createObjectURL(blob);
+        window.open(url);        
+      });
+    });
+  </script>
+</body>
+
+</html>
